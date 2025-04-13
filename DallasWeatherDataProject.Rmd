@@ -1,0 +1,987 @@
+---
+title: "Dallas Weather Data Project"
+author: "Stella Bazaldua, stella.bazaldua@gmail.com"
+date: "2024-07-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Clear the workspace. I do this every time
+###########################################################
+rm(list = ls())
+###########################################################
+# Set the seed. I also do this every time
+###########################################################
+set.seed(4428967)
+###########################################################
+# Set the working directory.
+###########################################################
+setwd("C:\\Users\\Stella\\Documents\\TAMUStatistics\\Stat626\\ProjectDatasets")
+```
+
+```{r}
+dallas_data = read.csv(file='3709527.csv')
+str(dallas_data)
+#unique(dallas_data$DATE)
+
+
+# Extract the relevant columns
+date <- as.Date(dallas_data$DATE, format = "%Y-%m-%d")  # Convert to Date format
+snow <- dallas_data$SNOW
+snow_depth <- dallas_data$SNWD
+temp_max <- dallas_data$TMAX
+temp_min <- dallas_data$TMIN
+precip <- dallas_data$PRCP
+
+# Create a new dataset with the specified variables
+dallas_subset <- data.frame(Date = date,
+                            Snow = snow,
+                            Snow_Depth = snow_depth,
+                            Temp_Max = temp_max,
+                            Temp_Min = temp_min,
+                            Precip = precip)
+head(dallas_subset)
+```
+
+```{r}
+anyNA(dallas_subset)
+
+# Count missing values in each column
+missing_counts <- colSums(is.na(dallas_subset))
+missing_counts
+
+# Impute missing values, right now just replacing them with the mean of the column
+dallas_subset$Snow[is.na(dallas_subset$Snow)] <- mean(dallas_subset$Snow, na.rm = TRUE)
+dallas_subset$Snow_Depth[is.na(dallas_subset$Snow_Depth)] <- mean(dallas_subset$Snow_Depth, na.rm = TRUE)
+dallas_subset$Temp_Max[is.na(dallas_subset$Temp_Max)] <- round(mean(dallas_subset$Temp_Max, na.rm = TRUE))
+dallas_subset$Temp_Min[is.na(dallas_subset$Temp_Min)] <- round(mean(dallas_subset$Temp_Min, na.rm = TRUE))
+dallas_subset$Precip[is.na(dallas_subset$Precip)] <- mean(dallas_subset$Precip, na.rm = TRUE)
+
+# Count missing values in each column again after replacing to verify
+missing_counts <- colSums(is.na(dallas_subset))
+missing_counts
+
+#write.csv(dallas_subset, file = "dallas_subset.csv", row.names = FALSE)
+```
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+#######################################################
+# Average Weeky Max Temps
+#######################################################
+
+weekly_avg_max_temps <- dallas_subset %>%
+  mutate(
+    Year = year(Date),
+    Week = week(Date)  # This assigns a week number (1-52/53) to each date
+  ) %>%
+  group_by(Year, Week) %>%
+  summarize(
+    Date = first(Date),  # Take the first date of the week for reference
+    Avg_Max_Temp = mean(Temp_Max, na.rm = TRUE),  
+    .groups = "drop"
+  ) %>%
+  arrange(Date) %>%
+  # Add a small amount of noise to break ties
+  mutate(Avg_Max_Temp = Avg_Max_Temp + runif(n(), -0.0001, 0.0001)) %>%
+  # Remove any resulting duplicates
+  distinct(Year, Week, .keep_all = TRUE) %>%
+  # Round back to original precision
+  mutate(Avg_Max_Temp = round(Avg_Max_Temp, 1))
+
+# Check for any remaining duplicates
+if(any(duplicated(weekly_avg_max_temps[c("Year", "Week")]))) {
+  print("There are still duplicate weeks")
+} else {
+  print("All weeks are unique")
+}
+
+# Display the first few rows of the result
+print(head(weekly_avg_max_temps, 10))
+#write.csv(weekly_avg_max_temps, file = "weekly_avg_max_temps.csv", row.names = FALSE)
+```
+
+```{r}
+#######################################################
+# Average Weeky Min Temps
+#######################################################
+
+weekly_avg_min_temps <- dallas_subset %>%
+  mutate(
+    Year = year(Date),
+    Week = week(Date)  # This assigns a week number (1-52/53) to each date
+  ) %>%
+  group_by(Year, Week) %>%
+  summarize(
+    Date = first(Date),  # Take the first date of the week for reference
+    Avg_Min_Temp = mean(Temp_Min, na.rm = TRUE),  
+    .groups = "drop"
+  ) %>%
+  arrange(Date) %>%
+  # Add a small amount of noise to break ties
+  mutate(Avg_Min_Temp = Avg_Min_Temp + runif(n(), -0.0001, 0.0001)) %>%
+  # Remove any resulting duplicates
+  distinct(Year, Week, .keep_all = TRUE) %>%
+  # Round back to original precision
+  mutate(Avg_Min_Temp = round(Avg_Min_Temp, 1))
+
+# Check for any remaining duplicates
+if(any(duplicated(weekly_avg_min_temps[c("Year", "Week")]))) {
+  print("There are still duplicate weeks")
+} else {
+  print("All weeks are unique")
+}
+
+# Display the first few rows of the result
+print(head(weekly_avg_min_temps, 10))
+#write.csv(weekly_avg_min_temps, file = "weekly_avg_min_temps.csv", row.names = FALSE)
+```
+
+```{r}
+#################################### START OF AVG WEEKLY MAX TEMPS ##########################
+
+library(astsa)  
+library(forecast)
+library(lubridate)
+
+start_date <- mdy("8/1/1939")
+end_date <- mdy("6/3/2024")
+
+total_days <- as.numeric(end_date - start_date)
+total_weeks <- total_days / 7
+total_years <- as.numeric(interval(start_date, end_date) / years(1))
+
+exact_frequency <- total_weeks / total_years
+
+print(paste("Total days:", total_days))
+print(paste("Total weeks:", total_weeks))
+print(paste("Total years:", total_years))
+print(paste("Exact frequency:", exact_frequency))
+
+weekly_avg_max_ts <- ts(weekly_avg_max_temps$Avg_Max_Temp, 
+                        start = c(1939, week(start_date)),
+                        frequency = exact_frequency)
+
+
+# Plot the time series
+tsplot(weekly_avg_max_ts, main = "Weekly Maximum Temperatures", ylab = "Temperature", col = "black")
+
+acf2(weekly_avg_max_ts)
+```
+
+```{r}
+# Log transformation to address any heteroscedasticity
+weekly_avg_max_ts_log <- log(weekly_avg_max_ts)
+
+write.csv(weekly_avg_max_ts_log, file = "weekly_avg_max_ts_log.csv", row.names = FALSE)
+
+# Plot the time series
+tsplot(weekly_avg_max_ts_log, main = "weekly Average Maximum Log(Temps)", ylab = "Temperature", col = "black")
+
+acf2(weekly_avg_max_ts_log)
+
+# Apply seasonal differencing
+weekly_avg_max_ts_diff <- diff(weekly_avg_max_ts, lag = 52)
+
+# Plot the seasonally differenced time series
+tsplot(weekly_avg_max_ts_diff, main = "Seasonally Differenced Weekly Average Maximum Temps", 
+       ylab = "Differenced Temperature", col = "black")
+
+# Check ACF and PACF of the differenced series
+acf2(weekly_avg_max_ts_diff)
+
+# Combine seasonal differencing and log transformation
+weekly_avg_max_ts_log_diff <- diff(weekly_avg_max_ts_log, lag = 52)
+
+# Plot the seasonally differenced log-transformed series
+tsplot(weekly_avg_max_ts_log_diff, 
+       main = "Log-Transformed and Seasonally Differenced Weekly Avg Max Temps",
+       ylab = "Differenced Log(Temperature)")
+
+# Check ACF and PACF of the new series
+acf2(weekly_avg_max_ts_log_diff)
+```
+
+```{r}
+sarima_max1 <- sarima(weekly_avg_max_ts_log, p=1, d=0, q=1, P=1, D=1, Q=1, S=exact_frequency)
+```
+
+```{r}
+################################ START OF AVG WEEKLY MIN TEMPS #######################
+weekly_avg_min_ts <- ts(weekly_avg_min_temps$Avg_Min_Temp, 
+                        start = c(1939, week(start_date)),
+                        frequency = exact_frequency)
+
+
+# Plot the time series
+tsplot(weekly_avg_min_ts, main = "Weekly Minimum Temperatures", ylab = "Temperature", col = "black")
+
+acf2(weekly_avg_min_ts)
+```
+
+```{r}
+# Log transformation to address any heteroscedasticity
+weekly_avg_min_ts_log <- log(weekly_avg_min_ts)
+
+write.csv(weekly_avg_min_ts_log, file = "weekly_avg_min_ts_log.csv", row.names = FALSE)
+
+# Plot the time series
+tsplot(weekly_avg_min_ts_log, main = "weekly Average Minimum Log(Temps)", ylab = "Temperature", col = "black")
+
+acf2(weekly_avg_min_ts_log)
+
+# Apply seasonal differencing
+weekly_avg_min_ts_diff <- diff(weekly_avg_min_ts, lag = 52)
+
+# Plot the seasonally differenced time series
+tsplot(weekly_avg_min_ts_diff, main = "Seasonally Differenced Weekly Average Minimum Temps", 
+       ylab = "Differenced Temperature", col = "black")
+
+# Check ACF and PACF of the differenced series
+acf2(weekly_avg_min_ts_diff)
+
+# Combine seasonal differencing and log transformation
+weekly_avg_min_ts_log_diff <- diff(weekly_avg_min_ts_log, lag = 52)
+
+# Plot the seasonally differenced log-transformed series
+tsplot(weekly_avg_min_ts_log_diff, 
+       main = "Log-Transformed and Seasonally Differenced Weekly Avg Min Temps",
+       ylab = "Differenced Log(Temperature)")
+
+# Check ACF and PACF of the new series
+acf2(weekly_avg_min_ts_log_diff)
+```
+
+```{r}
+sarima_min1 <- sarima(weekly_avg_min_ts_log, p=1, d=0, q=1, P=1, D=1, Q=1, S=exact_frequency)
+```
+
+```{r}
+################# START OF PRECIPITATION DATA #########################################
+
+####################################################
+#Average Monthly Precipitation .csv create
+###################################################
+monthly_avg_precip <- dallas_subset %>%
+  mutate(
+    Year = year(Date),
+    Month = month(Date)  # This assigns a week number (1-12) to each date
+  ) %>%
+  group_by(Year, Month) %>%
+  summarize(
+    Date = first(Date),  # Take the first date of the week for reference
+    Avg_Precip = mean(Precip, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(Date) %>%
+  # Add a small amount of noise to break ties
+  mutate(Avg_Precip = Avg_Precip + runif(n(), -0.0001, 0.0001)) %>%
+  # Remove any resulting duplicates
+  distinct(Year, Month, .keep_all = TRUE) %>%
+  # Round back to original precision
+  mutate(Avg_Precip = round(Avg_Precip, 2))
+
+# Check for any remaining duplicates
+if(any(duplicated(monthly_avg_precip[c("Year", "Month")]))) {
+  print("There are still duplicate months")
+} else {
+  print("All months are unique")
+}
+
+```
+
+```{r}
+# Create the time series object with precise start and end dates
+monthly_avg_precip_ts <- ts(monthly_avg_precip$Avg_Precip,
+                         start = c(1939, 8),  # August 1939
+                         end = c(2024, 6),    # June 2024
+                         frequency = 12)
+
+# Plot the time series
+tsplot(monthly_avg_precip_ts, main = "Monthly Average Precipitation", ylab = "Inches", col = "black")
+
+
+# Create a time variable
+time <- time(monthly_avg_precip_ts)
+
+# Fit a linear regression model
+lm_fit <- lm(monthly_avg_precip_ts ~ time)
+
+summary(lm_fit)
+
+# Add the linear regression line to the plot
+abline(lm_fit, col = "red", lwd = 2)
+
+# Add a legend
+legend("topleft", legend = c("Observed", "Linear Trend"), 
+       col = c("black", "red"), lty = 1, lwd = c(1, 2))
+
+# Get a summary of the time series
+summary(monthly_avg_precip_ts)
+
+acf2(monthly_avg_precip_ts)
+
+```
+
+```{r}
+# Log transformation to address any heteroscedasticity
+monthly_avg_precip_ts_log <- log(monthly_avg_precip_ts + 0.01)
+
+#write.csv(monthly_avg_precip_ts_log, file = "monthly_avg_precip_ts_log.csv", row.names = FALSE)
+
+# Plot the time series
+tsplot(monthly_avg_precip_ts_log, main = "Monthly Average Precipitation", ylab = "inches", col = "black")
+
+acf2(monthly_avg_precip_ts_log)
+
+# Apply seasonal differencing
+monthly_avg_precip_ts_diff <- diff(monthly_avg_precip_ts, lag = 12)
+
+# Plot the seasonally differenced time series
+tsplot(monthly_avg_precip_ts_diff, main = "Seasonally Differenced Monthly Average Rainfall", 
+       ylab = "Differenced Rainfall", col = "black")
+
+# Check ACF and PACF of the differenced series
+acf2(monthly_avg_precip_ts_diff)
+
+# Combine seasonal differencing and log transformation
+monthly_avg_precip_ts_log_diff <- diff(monthly_avg_precip_ts_log, lag = 12)
+
+# Plot the seasonally differenced log-transformed series
+tsplot(monthly_avg_precip_ts_log_diff, 
+       main = "Log-Transformed and Seasonally Differenced Monthly Precipitation",
+       ylab = "Differenced Precipitation")
+
+# Check ACF and PACF of the new series
+acf2(monthly_avg_precip_ts_log_diff)
+```
+
+```{r}
+sarima_precip1 <- sarima(monthly_avg_precip_ts, p=0, d=1, q=1, P=0, D=1, Q=1, S=12)
+```
+
+```{r}
+forecast1 <- sarima.for(monthly_avg_precip_ts, n.ahead=12, p=0, d=1, q=1, P=0, D=1, Q=1, S=12, main="Forecast Precipitation 12 Months")
+```
+
+```{r}
+sarima_precip2 <- sarima(monthly_avg_precip_ts, p=0, d=0, q=1, P=0, D=1, Q=1, S=12)
+```
+
+```{r}
+forecast1 <- sarima.for(monthly_avg_precip_ts, n.ahead=12, p=0, d=0, q=1, P=0, D=1, Q=1, S=12, main="Forecast Precipitation 12 Months")
+```
+
+```{r}
+###################### Unit Root Testing ####################################################
+library(tseries)
+
+# Monthly data adjusted
+monthly_avg_precip_ts_adjusted = monthly_avg_precip + 0.01
+
+# DF test
+adf.test(monthly_avg_precip_ts_log, k=0)
+
+# ADF test
+adf.test(monthly_avg_precip_ts_log)
+
+# pp.test
+pp.test(monthly_avg_precip_ts_log)
+```
+
+For all tests, the null hypothesis is that the time series has a unit root ( it is non-stationary). Given that all p-values are extremely small, \< 0.01 we reject the null hypothesis for all tests at any conventional significance level. This suggests that the precipitation data is stationary.
+
+ADF chose a lag order of 10
+
+Overall log of precipitation is stationary and there is no need for further differencing.
+
+```{r}
+# ARCH/GARCH testing
+
+library(fGarch)
+
+#MA(1) ARCH(1), this model is assuming the current period's volatility depends on the squared residual from the previous period but not on past conditional variances. Less common than GARCH(1,1)
+precip_garch_model1 = garchFit(~arma(0,1) + garch(1,0), data=monthly_avg_precip_ts)
+summary(precip_garch_model)
+
+
+```
+
+mu (mean) : 0.1005147
+
+ma1: 0.1451061
+
+omega: 0.0062088
+
+alpha1: 0.1461087 indicates presence of ARCH effects in the data.
+
+All coefficients are highly significant. Which indicates the presence of ARCH effects in the data. This suggests that past squared residuals influence current volatility.
+
+Jarques-Bera and Shapiro-Wilk tests both have p values \< 0.05, indicating non-normality in the standard residuals.
+
+Ljung-Box Test on standardized residuals, R, Q(10) is not significant, suggesting no autocorrelation in residuals up to lag 10. But there are some autocorellation at higher lags Q(15).
+
+Ljung-Box Test on squared standardized residuals (R\^2), all statistics are not significant, suggesting no remaining ARCH effects.
+
+LM Arch Test Not significant, confirming no remaining arch effects.
+
+Significant ARCH term (alpha1) confirms the presence of ARCH/GARCH behavior in precipitation data. This means that the volatility of precipitation changes over time in a way that can be modeled.
+
+Model seems to have captured the ARCH effects well, as indicatd by the non-significant Ljung-Box tests on squared residuals and the LM Arch Test.
+
+There might be some remaining autocorrelation in the residuals at higher lags (as seen in the Ljung-Box Test for R at lag 15), which suggests the model might not capture all the dynamics in the mean equation.
+
+The residuals are not normally distributed, this can be common.
+
+However, the non-normality of residuals and some remaining serial correlation at longer lags suggest that the model might not fully capture all the dynamics in your precipitation data.
+
+Try GARCH(1,1) to see if it captures the volatility dynamics even better.
+
+```{r}
+precip_garch_model11 = garchFit(~arma(0,1) + garch(1,1), data=monthly_avg_precip_ts)
+summary(precip_garch_model11)
+```
+
+mu (mean): 0.10051470 (almost identical to GARCH(1,0)
+
+ma1: 0.14510654 (almost identical to GARCH(1,0))
+
+omega: 0.00620879 (identical to GARCH(1,0))
+
+alpha: 0.14610928 (very similar to GARCH(1,0))
+
+beta1: 0.00000001 (new parameter, essentially zero)
+
+All coefficients exccept beta1 are highly significant with beta1 not significant at all
+
+GARCH(1,1) model essentially converged to GARCH(0,1) model. B1 does not contribute to conditional variance.
+
+Model fit is slightly worse than previous GARCH(1,1)
+
+THIS DATA SHOWS ARCH behavior but not GARCH behavior this means that there is short memory in volatility, the impact of shocks on volatility appear to be relatively short-lived. Past shocks influence current volatility (ARCH effect) but the influence doesn't persist through the conditional variance term (lack of GARCH effect)
+
+```{r}
+acf(monthly_avg_precip_ts)
+pacf(monthly_avg_precip_ts)
+```
+
+```{r}
+################### using log diff data #################################################
+
+monthly_avg_precip_adjusted = monthly_avg_precip_ts + 0.01  # Or another small value
+monthly_avg_precip_log_diff = diff(log(monthly_avg_precip_adjusted))
+
+#MA(1) ARCH(1), this model is assuming the current period's volatility depends on the squared residual from the previous period but not on past conditional variances. Less common than GARCH(1,1)
+precip_garch_model1 = garchFit(~arma(0,1) + garch(1,0), data=monthly_avg_precip_log_diff)
+summary(precip_garch_model1)
+```
+
+This shows weak ARCH effects.
+
+```{r}
+#MA(1) GARCH(1,1), this model is assuming the current period's volatility depends on the squared residual from the previous period but not on past conditional variances. Less common than GARCH(1,1)
+precip_garch_model11 = garchFit(~arma(0,1) + garch(1,1), data=monthly_avg_precip_log_diff)
+summary(precip_garch_model11)
+```
+
+No evidence of ARCH or GARCH behavior in log-transformed data.
+
+```{r}
+#################################### Facebook Prophet model on monthly average data ##################################################
+library(prophet)
+
+# Convert your precipitation time series to a data frame
+precip_df = data.frame(
+  ds = seq(from = as.Date("1939-08-01"), 
+           to = as.Date("2024-06-01"),     
+           by = "month"),
+  y = as.numeric(monthly_avg_precip_ts)
+)
+
+# Check the result
+head(precip_df)
+tail(precip_df)
+
+# Fit the Facebook Prophet Model
+prophet_model = prophet(precip_df, yearly.seasonality = TRUE)
+
+# Create future dates (13 months ahead for forecasting)
+future_dates = make_future_dataframe(prophet_model, periods = 13, freq = "month")
+
+# Forecast
+#forecast = predict(prophet_model, future_dates)
+
+# Plot the forecast
+#plot(prophet_model, forecast)
+
+# Plot zoomed in forecast 
+forecast <- predict(prophet_model, future_dates)
+plot_object <- plot(prophet_model,forecast)
+
+library(ggplot2)
+plot_object +
+  scale_x_datetime(limits = as.POSIXct(c("2018-01-01", "2024-07-27"))) +
+  labs(title = "Prophet Forecast", x = "Date", y = "Value")
+
+# Plot components
+prophet_plot_components(prophet_model, forecast)
+
+# Summary of the forecast
+summary(forecast)
+```
+
+Prophet model on cleaned up precipitation data shows a clear trend in monthly average precipitation data. Predicted values ranged from 0.05 to 0.198. Shows a clear seasonal pattern with peaks around April and October and a major dip around July which suggests a bimodal annual precipitation pattern.
+
+```{r}
+# Analyze residuals of prophet model
+
+# Calculate residuals
+residuals <- precip_df$y - forecast$yhat[1:nrow(precip_df)]
+
+# Add residuals to the forecast dataframe
+forecast$residuals <- c(residuals, rep(NA, nrow(forecast) - length(residuals)))
+
+# Time series plot of residuals
+par(mfrow=c(2,2))  # Set up a 2x2 plot layout
+
+tsplot(forecast$ds[1:length(residuals)], residuals, 
+       main="Time Series of Residuals", 
+       xlab="Date", ylab="Residual")
+abline(h=0, col="red", lty=2)
+
+# Histogram of residuals
+hist(residuals, breaks=30, main="Histogram of Residuals", 
+     xlab="Residual", col="lightblue", border="black")
+
+# Q-Q plot
+qqnorm(residuals)
+qqline(residuals, col="red")
+
+# Residuals vs. Fitted Values
+plot(forecast$yhat[1:length(residuals)], residuals, 
+     main="Residuals vs. Fitted Values", 
+     xlab="Fitted Values", ylab="Residuals")
+abline(h=0, col="red", lty=2)
+
+# Reset plot layout
+par(mfrow=c(1,1))
+
+# ACF plot
+acf(residuals, main="Autocorrelation of Residuals")
+
+# PACF plot
+pacf(residuals, main="Partial Autocorrelation of Residuals")
+
+# Statistical tests
+print(shapiro.test(residuals))
+print(Box.test(residuals, type="Ljung-Box"))
+```
+
+\# Use log transformed data in Prophet
+
+library(prophet)
+
+\# Convert your precipitation time series to a data frame
+
+precip_df = data.frame(
+
+ds = seq(from = as.Date("1939-08-01"),
+
+to = as.Date("2024-06-01"),
+
+by = "month"),
+
+y = as.numeric(monthly_avg_precip_ts)
+
+)
+
+\# Apply log transformation
+
+precip_df\$y_log = log(precip_df\$y + 1) \# Adding 1 to handle zero values
+
+\# Apply differencing
+
+precip_df\$y_log_diff = c(NA, diff(precip_df\$y_log))
+
+\# Remove the first row (NA due to differencing)
+
+precip_df = precip_df[-1,]
+
+\# Prepare data for Prophet
+
+prophet_df = data.frame(
+
+ds = precip_df\$ds,
+
+y = precip_df\$y_log_diff
+
+)
+
+\# Fit the Facebook Prophet Model
+
+prophet_model = prophet(prophet_df)
+
+\# Create future dates (13 months ahead for forecasting)
+
+future_dates = make_future_dataframe(prophet_model, periods = 13, freq = "month")
+
+\# Forecast
+
+forecast = predict(prophet_model, future_dates)
+
+\# Plot the forecast
+
+plot(prophet_model, forecast)
+
+\# Plot components
+
+prophet_plot_components(prophet_model, forecast)
+
+\# Summary of the forecast
+
+summary(forecast)
+
+\# Function to reverse the transformations
+
+reverse_transform = function(diff_forecast, last_log_value) {
+
+log_forecast = cumsum(c(last_log_value, diff_forecast))
+
+exp(log_forecast) - 1
+
+}
+
+\# Reverse transformations for the forecast
+
+last_log_value = tail(precip_df\$y_log, 1)
+
+forecast\$yhat_original = reverse_transform(forecast\$yhat, last_log_value)
+
+forecast\$yhat_lower_original = reverse_transform(forecast\$yhat_lower, last_log_value)
+
+forecast\$yhat_upper_original = reverse_transform(forecast\$yhat_upper, last_log_value)
+
+\# Plot the forecast in the original scale
+
+plot(forecast\$ds, forecast\$yhat_original, type = 'l',
+
+ylim = range(c(forecast\$yhat_lower_original, forecast\$yhat_upper_original)),
+
+xlab = 'Date', ylab = 'Precipitation', main = 'Forecast in Original Scale')
+
+lines(forecast\$ds, forecast\$yhat_lower_original, col = 'blue', lty = 2)
+
+lines(forecast\$ds, forecast\$yhat_upper_original, col = 'blue', lty = 2)
+
+points(precip_df\$ds, precip_df\$y, col = 'red')
+
+```{r}
+# Use log transformed data in Prophet
+library(prophet)
+
+# Convert your precipitation time series to a data frame
+precip_df = data.frame(
+  ds = seq(from = as.Date("1939-08-01"), 
+           to = as.Date("2024-06-01"),     
+           by = "month"),
+  y = as.numeric(monthly_avg_precip_ts)
+)
+
+# Apply log transformation
+precip_df$y_log = log(precip_df$y + 1)  # Adding 1 to handle zero values
+
+# Apply differencing
+precip_df$y_log_diff = c(NA, diff(precip_df$y_log))
+
+# Remove the first row (NA due to differencing)
+precip_df = precip_df[-1,]
+
+# Prepare data for Prophet
+prophet_df = data.frame(
+  ds = precip_df$ds,
+  y = precip_df$y_log_diff
+)
+
+# Fit the Facebook Prophet Model
+prophet_model = prophet(prophet_df)
+
+# Create future dates (13 months ahead for forecasting)
+future_dates = make_future_dataframe(prophet_model, periods = 13, freq = "month")
+
+# Forecast
+#forecast = predict(prophet_model, future_dates)
+
+# Plot the forecast
+#plot(prophet_model, forecast)
+
+# Plot zoomed in forecast 
+forecast <- predict(prophet_model, future_dates)
+plot_object <- plot(prophet_model,forecast)
+
+library(ggplot2)
+plot_object +
+  scale_x_datetime(limits = as.POSIXct(c("2018-01-01", "2026-07-27"))) +
+  labs(title = "Prophet Forecast", x = "Date", y = "Value")
+
+
+# Plot components
+prophet_plot_components(prophet_model, forecast)
+
+# Summary of the forecast
+summary(forecast)
+
+# Function to reverse the transformations
+reverse_transform = function(diff_forecast, last_log_value) {
+  log_forecast = cumsum(c(last_log_value, diff_forecast))
+  exp(log_forecast) - 1
+}
+
+# Reverse transformations for the forecast
+last_log_value = tail(precip_df$y_log, 1)
+forecast$yhat_original = reverse_transform(forecast$yhat[-1], last_log_value)
+forecast$yhat_lower_original = reverse_transform(forecast$yhat_lower[-1], last_log_value)
+forecast$yhat_upper_original = reverse_transform(forecast$yhat_upper[-1], last_log_value)
+
+# Adjust forecast to match the original data length
+forecast = forecast[-1,]
+
+# Plot the forecast in the original scale
+plot(forecast$ds, forecast$yhat_original, type = 'l', 
+     ylim = range(c(forecast$yhat_lower_original, forecast$yhat_upper_original)),
+     xlab = 'Date', ylab = 'Precipitation', main = 'Forecast in Original Scale')
+lines(forecast$ds, forecast$yhat_lower_original, col = 'blue', lty = 2)
+lines(forecast$ds, forecast$yhat_upper_original, col = 'blue', lty = 2)
+points(precip_df$ds, precip_df$y, col = 'red')
+```
+
+```{r}
+# Calculate residuals
+residuals <- prophet_df$y - forecast$yhat[1:nrow(prophet_df)]
+
+# Time series plot of residuals
+par(mfrow=c(2,2))
+plot(prophet_df$ds, residuals, type='l',
+     main="Time Series of Residuals", 
+     xlab="Date", ylab="Residual")
+abline(h=0, col="red", lty=2)
+
+# Histogram of residuals
+hist(residuals, breaks=30, main="Histogram of Residuals", 
+     xlab="Residual", col="lightblue", border="black")
+
+# Q-Q plot
+qqnorm(residuals)
+qqline(residuals, col="red")
+
+# Residuals vs. Fitted Values
+plot(forecast$yhat[1:length(residuals)], residuals, 
+     main="Residuals vs. Fitted Values", 
+     xlab="Fitted Values", ylab="Residuals")
+abline(h=0, col="red", lty=2)
+
+# Reset plot layout
+par(mfrow=c(1,1))
+
+# ACF plot
+acf(residuals, main="Autocorrelation of Residuals")
+
+# PACF plot
+pacf(residuals, main="Partial Autocorrelation of Residuals")
+
+# Statistical tests
+print(shapiro.test(residuals))
+print(Box.test(residuals, type="Ljung-Box"))
+
+# Calculate and print some summary statistics
+cat("Summary Statistics of Residuals:\n")
+print(summary(residuals))
+cat("\nStandard Deviation of Residuals:", sd(residuals), "\n")
+```
+
+```{r}
+# Use log transformed data in Prophet with seasonal component
+library(prophet)
+
+# Convert your precipitation time series to a data frame
+precip_df = data.frame(
+  ds = seq(from = as.Date("1939-08-01"), 
+           to = as.Date("2024-06-01"),     
+           by = "month"),
+  y = as.numeric(monthly_avg_precip_ts)
+)
+
+# Apply log transformation
+precip_df$y_log = log(precip_df$y + 1)  # Adding 1 to handle zero values
+
+# Apply differencing
+precip_df$y_log_diff = c(NA, diff(precip_df$y_log))
+
+# Remove the first row (NA due to differencing)
+precip_df = precip_df[-1,]
+
+# Prepare data for Prophet
+prophet_df = data.frame(
+  ds = precip_df$ds,
+  y = precip_df$y_log_diff
+)
+
+# Fit the Facebook Prophet Model
+prophet_model = prophet(prophet_df, yearly.seasonality = TRUE)
+
+# Create future dates (13 months ahead for forecasting)
+future_dates = make_future_dataframe(prophet_model, periods = 13, freq = "month")
+
+# Forecast
+forecast = predict(prophet_model, future_dates)
+
+# Plot the forecast
+plot(prophet_model, forecast)
+
+# Plot components
+#prophet_plot_components(prophet_model, forecast)
+
+# Summary of the forecast
+#summary(forecast)
+
+# Plot zoomed in forecast 
+forecast <- predict(prophet_model, future_dates)
+plot_object <- plot(prophet_model,forecast)
+
+library(ggplot2)
+plot_object +
+  scale_x_datetime(limits = as.POSIXct(c("2018-01-01", "2026-07-27"))) +
+  labs(title = "Prophet Forecast", x = "Date", y = "Value")
+
+# Function to reverse the transformations
+reverse_transform = function(diff_forecast, last_log_value) {
+  log_forecast = cumsum(c(last_log_value, diff_forecast))
+  exp(log_forecast) - 1
+}
+
+# Reverse transformations for the forecast
+last_log_value = tail(precip_df$y_log, 1)
+forecast$yhat_original = reverse_transform(forecast$yhat[-1], last_log_value)
+forecast$yhat_lower_original = reverse_transform(forecast$yhat_lower[-1], last_log_value)
+forecast$yhat_upper_original = reverse_transform(forecast$yhat_upper[-1], last_log_value)
+
+# Adjust forecast to match the original data length
+forecast = forecast[-1,]
+
+# Plot the forecast in the original scale
+plot(forecast$ds, forecast$yhat_original, type = 'l', 
+     ylim = range(c(forecast$yhat_lower_original, forecast$yhat_upper_original)),
+     xlab = 'Date', ylab = 'Precipitation', main = 'Forecast in Original Scale')
+lines(forecast$ds, forecast$yhat_lower_original, col = 'blue', lty = 2)
+lines(forecast$ds, forecast$yhat_upper_original, col = 'blue', lty = 2)
+points(precip_df$ds, precip_df$y, col = 'red')
+
+
+```
+
+```{r}
+
+```
+
+```{r}
+# Calculate residuals with seasonality
+residuals <- prophet_df$y - forecast$yhat[1:nrow(prophet_df)]
+
+# Time series plot of residuals
+par(mfrow=c(2,2))
+plot(prophet_df$ds, residuals, type='l',
+     main="Time Series of Residuals", 
+     xlab="Date", ylab="Residual")
+abline(h=0, col="red", lty=2)
+
+# Histogram of residuals
+hist(residuals, breaks=30, main="Histogram of Residuals", 
+     xlab="Residual", col="lightblue", border="black")
+
+# Q-Q plot
+qqnorm(residuals)
+qqline(residuals, col="red")
+
+# Residuals vs. Fitted Values
+plot(forecast$yhat[1:length(residuals)], residuals, 
+     main="Residuals vs. Fitted Values", 
+     xlab="Fitted Values", ylab="Residuals")
+abline(h=0, col="red", lty=2)
+
+# Reset plot layout
+par(mfrow=c(1,1))
+
+# ACF plot
+acf(residuals, main="Autocorrelation of Residuals")
+
+# PACF plot
+pacf(residuals, main="Partial Autocorrelation of Residuals")
+
+# Statistical tests
+print(shapiro.test(residuals))
+print(Box.test(residuals, type="Ljung-Box"))
+
+# Calculate and print some summary statistics
+cat("Summary Statistics of Residuals:\n")
+print(summary(residuals))
+cat("\nStandard Deviation of Residuals:", sd(residuals), "\n")
+```
+
+```{r}
+############### Compare Prophet forecast with SARIMA forecast ############################################
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+
+# Prepare SARIMA forecast data
+sarima_forecast <- data.frame(
+  ds = seq(from = max(precip_df$ds) + months(1), 
+           by = "month", 
+           length.out = 12),
+  yhat = as.numeric(forecast1$pred),
+  model = "SARIMA"
+)
+
+# Prepare Prophet forecast data
+prophet_forecast <- data.frame(
+  ds = tail(forecast$ds, 12),
+  yhat = tail(forecast$yhat_original, 12),
+  model = "Prophet"
+)
+
+# Combine forecasts
+combined_forecast <- rbind(sarima_forecast, prophet_forecast)
+
+# Prepare historical data
+historical_data <- data.frame(
+  ds = precip_df$ds,
+  y = precip_df$y
+)
+
+# Create the plot
+ggplot() +
+  # Historical data
+  geom_line(data = historical_data, aes(x = ds, y = y), color = "black") +
+  # SARIMA forecast
+  geom_line(data = filter(combined_forecast, model == "SARIMA"), 
+            aes(x = ds, y = yhat, color = model), linewidth = 1) +
+  # Prophet forecast
+  geom_line(data = filter(combined_forecast, model == "Prophet"), 
+            aes(x = ds, y = yhat, color = model), linewidth = 1) +
+  # Customize the plot
+  scale_color_manual(values = c("SARIMA" = "blue", "Prophet" = "red")) +
+  labs(title = "Comparison of SARIMA and Prophet Forecasts",
+       x = "Date",
+       y = "Precipitation",
+       color = "Model") +
+  theme_minimal() +
+  scale_x_date(limits = c(as.Date("2018-01-01"), max(combined_forecast$ds)),
+               date_breaks = "1 year", 
+               date_labels = "%Y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
