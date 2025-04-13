@@ -4,6 +4,10 @@ This project uses historical monthly average precipitation data (from August 193
 two time series forecasting models: Facebook Prophet and SARIMA. The goal is to evaluate their performance and 
 visualize forecasted precipitation over the next 12 months.
 
+Data from the National Centers For Environmental Information website: https://www.ncei.noaa.gov
+
+Data Link: https://www.ncei.noaa.gov/cdo-web/datasets/GHCND/stations/GHCND:US1TXDA0053/detail
+
 The analysis includes:
 
 * Data preprocessing with log transformation and differencing
